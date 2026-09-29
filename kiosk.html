@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>場地自助選座機 / Venue Kiosk</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+</head>
+<body>
+  <div class="container text-center">
+    <h1>場地自助選座機<br><small>Venue Kiosk</small></h1>
+    <div id="mainMenu" class="card">
+      <button class="btn btn-primary btn-large" onclick="startStudent()">學生選座<br><small>Student Seat Selection</small></button>
+      <button class="btn btn-primary btn-large" onclick="startVisitor()">訪客／教職員選座<br><small>Visitor / Staff Seat Selection</small></button>
+    </div>
+
+    <div id="studentPanel" class="card hidden">
+      <h2>請拍學生證<br><small>Please tap student card</small></h2>
+      <button class="btn btn-danger" onclick="backToMenu()">返回 / Back</button>
+    </div>
+
+    <div id="visitorPanel" class="card hidden">
+      <h2>掃描 QR Code 或輸入訂單編號<br><small>Scan QR Code or Enter Order No.</small></h2>
+      <div id="reader" style="width: 300px; margin: 0 auto;"></div>
+      <input type="text" id="manualOrderId" placeholder="手動輸入訂單編號 / Manual Order No.">
+      <button class="btn btn-primary" onclick="searchVisitorOrder()">查詢 / Search</button>
+      <button class="btn btn-danger" onclick="backToMenu()">返回 / Back</button>
+    </div>
+
+    <div id="seatPanel" class="card hidden">
+      <h2>選擇座位<br><small>Select Seat</small></h2>
+      <div id="seatMapContainer"></div>
+      <button class="btn btn-success" onclick="confirmKioskSeat()">確認並列印 / Confirm & Print</button>
+    </div>
+  </div>
+  <div id="printArea"></div>
+
+  <script>
+    let currentOrder = null;
+    let selectedSeat = null;
+    let html5QrCode = null;
+
+    setupHIDListener(handleKioskInput);
+
+    async function handleKioskInput(input) {
+      if (document.getElementById('studentPanel').classList.contains('hidden')) return;
+      const cardSnap = await db.ref("cards/" + input).once("value");
+      if (cardSnap.exists()) {
+        const orderIds = Object.keys(cardSnap.val());
+        if (orderIds.length > 0) {
+          const orderSnap = await db.ref("orders/" + orderIds[0]).once("value");
+          const order = orderSnap.val();
+          if (order && order.status === "paid" && !order.hasSelectedSeat) {
+            currentOrder = order;
+            showSeatSelection();
+          } else alert("訂單狀態無效或已選座 / Invalid order or already selected");
+        }
+      }
+    }
+
+    function startStudent() {
+      document.getElementById('mainMenu').classList.add('hidden');
+      document.getElementById('studentPanel').classList.remove('hidden');
+    }
+
+    function startVisitor() {
+      document.getElementById('mainMenu').classList.add('hidden');
+      document.getElementById('visitorPanel').classList.remove('hidden');
+      if(!html5QrCode) {
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, searchVisitorOrder).catch(err => console.log(err));
+      }
+    }
+
+    function backToMenu() {
+      if(html5QrCode && html5QrCode.isScanning) html5QrCode.stop();
+      document.querySelectorAll('.card').forEach(c => c.classList.add('hidden'));
+      document.getElementById('mainMenu').classList.remove('hidden');
+    }
+
+    async function searchVisitorOrder() {
+      let id = document.getElementById('manualOrderId').value.trim().toUpperCase();
+      if(!id) return;
+      const snap = await db.ref("orders/" + id).once("value");
+      const order = snap.val();
+      if (!order || order.status !== "paid") return alert("訂單編號無效 / Invalid Order No.");
+      if (order.hasSelectedSeat) return alert("此訂單已選座 / Seat already reserved");
+      currentOrder = order;
+      if(html5QrCode && html5QrCode.isScanning) html5QrCode.stop();
+      showSeatSelection();
+    }
+
+    function showSeatSelection() {
+      document.querySelectorAll('.card').forEach(c => c.classList.add('hidden'));
+      document.getElementById('seatPanel').classList.remove('hidden');
+      selectedSeat = null;
+      renderSeatMap(currentOrder.eventId, null, 'selectSeatKiosk');
+    }
+
+    window.selectSeatKiosk = function(seatId) {
+      selectedSeat = selectedSeat === seatId ? null : seatId;
+      renderSeatMap(currentOrder.eventId, selectedSeat, 'selectSeatKiosk');
+    }
+
+    async function confirmKioskSeat() {
+      if (!selectedSeat) return alert("請選擇座位 / Please select a seat");
+      await confirmSeatSelection(currentOrder, selectedSeat);
+      printVoucher(currentOrder, 0, true);
+      alert("座位已預留 / Seat reserved");
+      setTimeout(backToMenu, 2000);
+    }
+  </script>
+</body>
+</html>
