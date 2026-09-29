@@ -11,67 +11,59 @@
 </head>
 <body>
   <div class="container">
+    <!-- 登入區塊 -->
     <div id="loginSection" class="card text-center">
       <h2>管理員登入<br><small>Administrator Login</small></h2>
-      <input type="password" id="adminPass" placeholder="管理員密碼 / Administrator Password">
-      <button class="btn btn-primary" onclick="adminLogin()">登入 / Login</button>
+      <input type="email" id="adminEmail" placeholder="管理員電郵 / Admin Email">
+      <input type="password" id="adminPass" placeholder="密碼 / Password (ktmc2026)">
+      <button class="btn btn-primary" onclick="doAdminLogin()">登入 / Login</button>
     </div>
 
+    <!-- 管理面板 (預設隱藏) -->
     <div id="adminPanel" class="hidden">
       <h1>系統管理<br><small>Administration</small></h1>
       <div class="card">
         <button class="btn btn-primary" onclick="exportAll()">匯出全部資料 / Export All Data</button>
         <button class="btn btn-primary" onclick="exportData('orders')">匯出訂單 / Export Orders</button>
-        <button class="btn btn-primary" onclick="exportData('staff')">匯出售票員 / Export Staff</button>
-        <button class="btn btn-primary" onclick="exportData('events')">匯出活動 / Export Events</button>
-        <button class="btn btn-primary" onclick="exportData('seats')">匯出座位 / Export Seats</button>
-        <button class="btn btn-primary" onclick="exportData('checkinLogs')">匯出檢票記錄 / Export Check-in Logs</button>
-        <button class="btn btn-primary" onclick="exportData('reprintLogs')">匯出重新列印記錄 / Export Reprint Logs</button>
       </div>
       
       <div class="card">
         <h3>新增售票員 / Add Staff</h3>
+        <p style="color:red; font-size:12px;">注意：使用 Firebase Auth 後，請在 Firebase Console 手動建立售票員帳號，並在此新增員工資料。</p>
         <input type="text" id="staffId" placeholder="工號 / Staff ID">
         <input type="text" id="staffName" placeholder="姓名 / Name">
-        <input type="password" id="staffPass" placeholder="密碼 / Password">
-        <button class="btn btn-success" onclick="addStaff()">新增 / Add</button>
+        <input type="email" id="staffEmail" placeholder="登入電郵 / Login Email">
+        <button class="btn btn-success" onclick="addStaffToDb()">新增員工資料 / Add Staff Data</button>
       </div>
 
       <div class="card">
         <h3>訂單列表 / Orders</h3>
         <table id="ordersTable"><thead><tr><th>訂單編號</th><th>活動</th><th>身份</th><th>座位</th><th>狀態</th></tr></thead><tbody></tbody></table>
       </div>
+      <button class="btn btn-danger" onclick="auth.signOut()">登出 / Logout</button>
     </div>
   </div>
   <div id="printArea"></div>
 
   <script>
-    function adminLogin() {
-      if (document.getElementById('adminPass').value === ADMIN_PASSWORD) {
-        sessionStorage.setItem("adminSession", "1");
-        document.getElementById('loginSection').classList.add('hidden');
-        document.getElementById('adminPanel').classList.remove('hidden');
-        loadOrders();
-      } else alert("密碼錯誤 / Incorrect password");
+    async function doAdminLogin() {
+      const email = document.getElementById('adminEmail').value;
+      const pass = document.getElementById('adminPass').value;
+      const result = await loginWithEmail(email, pass);
+      if (!result.ok) alert("登入失敗: " + result.message);
     }
 
-    if (sessionStorage.getItem("adminSession") === "1") {
-      document.getElementById('loginSection').classList.add('hidden');
-      document.getElementById('adminPanel').classList.remove('hidden');
-      loadOrders();
-    }
-
-    async function addStaff() {
+    async function addStaffToDb() {
       const id = document.getElementById('staffId').value.trim().toUpperCase();
       const name = document.getElementById('staffName').value;
-      const pass = document.getElementById('staffPass').value;
-      if(!id || !name || !pass) return alert("請填寫所有欄位 / Please fill all fields");
-      const hash = await sha256(id + ":" + pass);
+      const email = document.getElementById('staffEmail').value;
+      if(!id || !name || !email) return alert("請填寫所有欄位 / Please fill all fields");
+      // 注意：這裡只是新增資料，實際登入帳號需要在 Firebase Console 建立
       await db.ref("staff/" + id).set({
-        employeeId: id, name, passwordHash: hash, active: true,
-        createdBy: "admin", createdAt: Date.now(), updatedAt: Date.now()
+        employeeId: id, name, email, active: true,
+        createdBy: auth.currentUser.email, createdAt: Date.now(), updatedAt: Date.now()
       });
-      alert("新增成功 / Added successfully");
+      alert("員工資料已新增 / Staff data added");
     }
 
     async function loadOrders() {
@@ -112,6 +104,9 @@
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), type);
       downloadExcel(wb, `${type}-${formatDateForFile(new Date())}.xlsx`);
     }
+
+    // 啟動頁面守衛：只有 'admin' 角色可以進入此頁面
+    requireRole('admin', 'index.html');
   </script>
 </body>
 </html>
