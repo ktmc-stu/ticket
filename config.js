@@ -1,11 +1,12 @@
-const FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+const firebaseConfig = {
+  apiKey: "AIzaSyCABSxgaaIB4vb0dm9p3a2Xp3TRaiHndfU",
+  authDomain: "ktmc-ticketing.firebaseapp.com",
+  databaseURL: "https://ktmc-ticketing-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "ktmc-ticketing",
+  storageBucket: "ktmc-ticketing.firebasestorage.app",
+  messagingSenderId: "723250448539",
+  appId: "1:723250448539:web:77a3280ffde2828b475e3e",
+  measurementId: "G-F1RJCDHK9D"
 };
 
 const ADMIN_PASSWORD = "ktmc2026";
