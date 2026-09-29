@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>網上預先選座 / Online Seat Reservation</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+</head>
+<body>
+  <div class="container text-center">
+    <h1>網上預先選座<br><small>Online Seat Reservation</small></h1>
+    <div class="card">
+      <input type="text" id="orderIdInput" placeholder="訂單編號 / Order No.">
+      <button class="btn btn-primary" onclick="searchOrderForWeb()">查詢訂單 / Search Order</button>
+      <div id="seatMapContainer"></div>
+      <button id="btnConfirm" class="btn btn-success hidden" onclick="confirmWebSeat()">確認選座 / Confirm Seat Selection</button>
+    </div>
+  </div>
+
+  <script>
+    let currentOrder = null;
+    let selectedSeat = null;
+
+    async function searchOrderForWeb() {
+      const id = document.getElementById('orderIdInput').value.trim().toUpperCase();
+      const snap = await db.ref("orders/" + id).once("value");
+      const order = snap.val();
+      if (!order || order.status !== "paid") return alert("訂單編號無效 / Invalid Order No.");
+      if (order.hasSelectedSeat) return alert("此訂單已選座 / Seat already reserved");
+      currentOrder = order;
+      selectedSeat = null;
+      renderSeatMap(order.eventId, null, 'selectSeatWeb');
+      document.getElementById('btnConfirm').classList.remove('hidden');
+    }
+
+    window.selectSeatWeb = function(seatId) {
+      selectedSeat = selectedSeat === seatId ? null : seatId;
+      renderSeatMap(currentOrder.eventId, selectedSeat, 'selectSeatWeb');
+    }
+
+    async function confirmWebSeat() {
+      if (!selectedSeat) return alert("請選擇座位 / Please select a seat");
+      await confirmSeatSelection(currentOrder, selectedSeat);
+      alert("座位已預留 / Seat reserved");
+      location.reload();
+    }
+  </script>
+</body>
+</html>
