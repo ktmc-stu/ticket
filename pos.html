@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>人工售票 / Manual Ticketing</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div id="loginSection" class="card text-center">
+      <h2>售票員登入<br><small>Ticketing Staff Login</small></h2>
+      <input type="text" id="staffId" placeholder="工號 / Staff ID">
+      <input type="password" id="staffPass" placeholder="密碼 / Password">
+      <button class="btn btn-primary" onclick="staffLogin()">登入 / Login</button>
+    </div>
+
+    <div id="posPanel" class="hidden">
+      <h1>人工售票終端<br><small>Manual Ticketing Terminal</small></h1>
+      <div class="card">
+        <h3>建立訂單 / Create Order</h3>
+        <select id="eventId"><option value="">選擇活動 / Select Event</option></select>
+        <select id="buyerType">
+          <option value="student_A">本校學生 / Student of this School</option>
+          <option value="student_other">他校學生 / Student of Other Schools</option>
+          <option value="staff">教職員 / Staff</option>
+          <option value="visitor">訪客 / Visitor</option>
+        </select>
+        <input type="text" id="buyerCard" placeholder="學生證號碼 / Student Card (選填)">
+        <input type="text" id="buyerName" placeholder="姓名 / Name (選填)">
+        <input type="number" id="amount" placeholder="金額 / Amount" value="50">
+        <div id="seatMapContainer"></div>
+        <button class="btn btn-success" onclick="submitOrder()">確認並列印 / Confirm & Print</button>
+      </div>
+
+      <div class="card">
+        <h3>訂單查詢與重新列印 / Order Search & Reprint</h3>
+        <input type="text" id="searchOrderId" placeholder="訂單編號 / Order No.">
+        <button class="btn btn-primary" onclick="searchOrder()">查詢 / Search</button>
+        <div id="searchResult"></div>
+      </div>
+    </div>
+  </div>
+  <div id="printArea"></div>
+
+  <script>
+    let currentEvent = null;
+    let selectedSeat = null;
+
+    async function staffLogin() {
+      const id = document.getElementById('staffId').value.trim().toUpperCase();
+      const pass = document.getElementById('staffPass').value;
+      const snap = await db.ref("staff/" + id).once("value");
+      const staff = snap.val();
+      if (!staff || !staff.active) return alert("帳號無效 / Invalid account");
+      const hash = await sha256(id + ":" + pass);
+      if (hash !== staff.passwordHash) return alert("密碼錯誤 / Incorrect password");
+      sessionStorage.setItem("posStaffId", id);
+      sessionStorage.setItem("posStaffName", staff.name);
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('posPanel').classList.remove('hidden');
+      loadEvents();
+    }
+
+    if (sessionStorage.getItem("posStaffId")) {
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('posPanel').classList.remove('hidden');
+      loadEvents();
+    }
+
+    async function loadEvents() {
+      const snap = await db.ref("events").once("value");
+      const events = snap.val() || {};
+      const select = document.getElementById('eventId');
+      select.innerHTML = '<option value="">選擇活動 / Select Event</option>';
+      Object.values(events).forEach(e => {
+        select.innerHTML += `<option value="${e.eventId}" data-zh="${e.name_zh}" data-en="${e.name_en}">${e.name_zh} / ${e.name_en}</option>`;
+      });
+      select.onchange = (e) => {
+        currentEvent = events[e.target.value];
+        selectedSeat = null;
+        if(currentEvent) renderSeatMap(currentEvent.eventId, null, 'selectSeatPOS');
+      };
+    }
+
+    window.selectSeatPOS = function(seatId) {
+      selectedSeat = selectedSeat === seatId ? null : seatId;
+      renderSeatMap(currentEvent.eventId, selectedSeat, 'selectSeatPOS');
+    }
+
+    async function submitOrder() {
+      if (!currentEvent) return alert("請選擇活動 / Please select event");
+      const order = await createOrder({
+        eventId: currentEvent.eventId, eventName_zh: currentEvent.name_zh, eventName_en: currentEvent.name_en,
+        buyerType: document.getElementById('buyerType').value,
+        buyerCard: document.getElementById('buyerCard').value,
+        buyerName: document.getElementById('buyerName').value,
+        amount: document.getElementById('amount').value,
+        seatId: selectedSeat
+      });
+      printReceipt(order);
+      if (selectedSeat) printVoucher(order, 0, false);
+      alert("訂單已建立 / Order created");
+      selectedSeat = null;
+      renderSeatMap(currentEvent.eventId, null, 'selectSeatPOS');
+    }
+
+    async function searchOrder() {
+      const id = document.getElementById('searchOrderId').value.trim().toUpperCase();
+      const snap = await db.ref("orders/" + id).once("value");
+      const order = snap.val();
+      const res = document.getElementById('searchResult');
+      if (!order) { res.innerHTML = "找不到訂單 / Order not found"; return; }
+      res.innerHTML = `
+        <p>訂單編號: ${order.orderId} | 座位: ${order.seatId || '未選'}</p>
+        <button class="btn btn-warning" onclick="reprint('${order.orderId}', 'receipt')">重新列印收據 / Reprint Receipt (#${order.receiptReprintCount})</button>
+        <button class="btn btn-warning" onclick="reprint('${order.orderId}', 'voucher')" ${!order.seatId?'disabled':''}>重新列印憑條 / Reprint Voucher (#${order.voucherReprintCount})</button>
+      `;
+    }
+
+    async function reprint(orderId, docType) {
+      const nth = await authorizeReprint(orderId, docType);
+      if (!nth) return;
+      const snap = await db.ref("orders/" + orderId).once("value");
+      const order = snap.val();
+      if (docType === 'receipt') printReceipt(order, nth);
+      else printVoucher(order, nth, false);
+    }
+  </script>
+</body>
+</html>
