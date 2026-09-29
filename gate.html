@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>檢票 / Ticket Checking</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+</head>
+<body>
+  <div class="container text-center">
+    <h1>檢票<br><small>Ticket Checking</small></h1>
+    <div class="card">
+      <p>請掃描二維碼、拍卡或輸入訂單編號<br><small>Please scan QR code, tap card or enter order number</small></p>
+      <div id="reader" style="width: 300px; margin: 0 auto;"></div>
+      <input type="text" id="manualInput" placeholder="手動輸入 / Manual Input">
+      <button class="btn btn-primary" onclick="handleGateInput(document.getElementById('manualInput').value)">確認 / Confirm</button>
+    </div>
+    
+    <div id="gateResult" class="gate-result"></div>
+  </div>
+
+  <script>
+    const html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, handleGateInput).catch(err => console.log(err));
+    
+    setupHIDListener(handleGateInput);
+
+    async function handleGateInput(input) {
+      input = input.trim().toUpperCase();
+      if(!input) return;
+      document.getElementById('manualInput').value = "";
+      let order = null, method = "manual";
+      
+      const orderSnap = await db.ref("orders/" + input).once("value");
+      if (orderSnap.exists()) {
+        order = orderSnap.val();
+        method = input.length >= 10 ? "qr" : "manual";
+      } else {
+        const cardSnap = await db.ref("cards/" + input).once("value");
+        if (cardSnap.exists()) {
+          const orderIds = Object.keys(cardSnap.val());
+          if (orderIds.length > 0) {
+            const orderData = await db.ref("orders/" + orderIds[orderIds.length - 1]).once("value");
+            order = orderData.val();
+            method = "card";
+          }
+        }
+      }
+
+      const resDiv = document.getElementById('gateResult');
+      if (!order) {
+        resDiv.className = 'gate-result gate-error';
+        resDiv.innerText = "找不到訂單 / Order Not Found";
+        logCheckin(input, method, "not_found");
+        return;
+      }
+      if (order.checkinAt) {
+        resDiv.className = 'gate-result gate-error';
+        resDiv.innerText = "已核銷 / Already Checked In";
+        logCheckin(order.orderId, method, "already_checked_in");
+        return;
+      }
+      if (!order.hasSelectedSeat) {
+        resDiv.className = 'gate-result gate-error';
+        resDiv.innerText = "未選座 / Seat Not Selected";
+        logCheckin(order.orderId, method, "no_seat");
+        return;
+      }
+
+      await db.ref("orders/" + order.orderId).update({
+        status: "checked_in", checkinAt: Date.now(), checkinMethod: method, updatedAt: Date.now()
+      });
+
+      resDiv.className = 'gate-result gate-success';
+      resDiv.innerHTML = `成功 / Success<br><small>訂單: ${order.orderId} | 座位: ${order.seatId}</small>`;
+      logCheckin(order.orderId, method, "success");
+    }
+
+    async function logCheckin(orderId, method, result) {
+      await db.ref("checkinLogs").push({ orderId, method, result, at: Date.now() });
+    }
+  </script>
+</body>
+</html>
