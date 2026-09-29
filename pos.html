@@ -11,13 +11,15 @@
 </head>
 <body>
   <div class="container">
+    <!-- 登入區塊 -->
     <div id="loginSection" class="card text-center">
       <h2>售票員登入<br><small>Ticketing Staff Login</small></h2>
-      <input type="text" id="staffId" placeholder="工號 / Staff ID">
+      <input type="email" id="staffEmail" placeholder="售票員電郵 / Staff Email">
       <input type="password" id="staffPass" placeholder="密碼 / Password">
-      <button class="btn btn-primary" onclick="staffLogin()">登入 / Login</button>
+      <button class="btn btn-primary" onclick="doStaffLogin()">登入 / Login</button>
     </div>
 
+    <!-- 售票面板 (預設隱藏) -->
     <div id="posPanel" class="hidden">
       <h1>人工售票終端<br><small>Manual Ticketing Terminal</small></h1>
       <div class="card">
@@ -42,6 +44,7 @@
         <button class="btn btn-primary" onclick="searchOrder()">查詢 / Search</button>
         <div id="searchResult"></div>
       </div>
+      <button class="btn btn-danger" onclick="auth.signOut()">登出 / Logout</button>
     </div>
   </div>
   <div id="printArea"></div>
@@ -50,25 +53,11 @@
     let currentEvent = null;
     let selectedSeat = null;
 
-    async function staffLogin() {
-      const id = document.getElementById('staffId').value.trim().toUpperCase();
+    async function doStaffLogin() {
+      const email = document.getElementById('staffEmail').value;
       const pass = document.getElementById('staffPass').value;
-      const snap = await db.ref("staff/" + id).once("value");
-      const staff = snap.val();
-      if (!staff || !staff.active) return alert("帳號無效 / Invalid account");
-      const hash = await sha256(id + ":" + pass);
-      if (hash !== staff.passwordHash) return alert("密碼錯誤 / Incorrect password");
-      sessionStorage.setItem("posStaffId", id);
-      sessionStorage.setItem("posStaffName", staff.name);
-      document.getElementById('loginSection').classList.add('hidden');
-      document.getElementById('posPanel').classList.remove('hidden');
-      loadEvents();
-    }
-
-    if (sessionStorage.getItem("posStaffId")) {
-      document.getElementById('loginSection').classList.add('hidden');
-      document.getElementById('posPanel').classList.remove('hidden');
-      loadEvents();
+      const result = await loginWithEmail(email, pass);
+      if (!result.ok) alert("登入失敗: " + result.message);
     }
 
     async function loadEvents() {
@@ -129,6 +118,9 @@
       if (docType === 'receipt') printReceipt(order, nth);
       else printVoucher(order, nth, false);
     }
+
+    // 啟動頁面守衛：只有 'staff' 角色可以進入此頁面
+    requireRole('staff', 'index.html');
   </script>
 </body>
 </html>
