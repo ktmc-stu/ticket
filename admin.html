@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>系統管理 / Administration</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div id="loginSection" class="card text-center">
+      <h2>管理員登入<br><small>Administrator Login</small></h2>
+      <input type="password" id="adminPass" placeholder="管理員密碼 / Administrator Password">
+      <button class="btn btn-primary" onclick="adminLogin()">登入 / Login</button>
+    </div>
+
+    <div id="adminPanel" class="hidden">
+      <h1>系統管理<br><small>Administration</small></h1>
+      <div class="card">
+        <button class="btn btn-primary" onclick="exportAll()">匯出全部資料 / Export All Data</button>
+        <button class="btn btn-primary" onclick="exportData('orders')">匯出訂單 / Export Orders</button>
+        <button class="btn btn-primary" onclick="exportData('staff')">匯出售票員 / Export Staff</button>
+        <button class="btn btn-primary" onclick="exportData('events')">匯出活動 / Export Events</button>
+        <button class="btn btn-primary" onclick="exportData('seats')">匯出座位 / Export Seats</button>
+        <button class="btn btn-primary" onclick="exportData('checkinLogs')">匯出檢票記錄 / Export Check-in Logs</button>
+        <button class="btn btn-primary" onclick="exportData('reprintLogs')">匯出重新列印記錄 / Export Reprint Logs</button>
+      </div>
+      
+      <div class="card">
+        <h3>新增售票員 / Add Staff</h3>
+        <input type="text" id="staffId" placeholder="工號 / Staff ID">
+        <input type="text" id="staffName" placeholder="姓名 / Name">
+        <input type="password" id="staffPass" placeholder="密碼 / Password">
+        <button class="btn btn-success" onclick="addStaff()">新增 / Add</button>
+      </div>
+
+      <div class="card">
+        <h3>訂單列表 / Orders</h3>
+        <table id="ordersTable"><thead><tr><th>訂單編號</th><th>活動</th><th>身份</th><th>座位</th><th>狀態</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+  <div id="printArea"></div>
+
+  <script>
+    function adminLogin() {
+      if (document.getElementById('adminPass').value === ADMIN_PASSWORD) {
+        sessionStorage.setItem("adminSession", "1");
+        document.getElementById('loginSection').classList.add('hidden');
+        document.getElementById('adminPanel').classList.remove('hidden');
+        loadOrders();
+      } else alert("密碼錯誤 / Incorrect password");
+    }
+
+    if (sessionStorage.getItem("adminSession") === "1") {
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('adminPanel').classList.remove('hidden');
+      loadOrders();
+    }
+
+    async function addStaff() {
+      const id = document.getElementById('staffId').value.trim().toUpperCase();
+      const name = document.getElementById('staffName').value;
+      const pass = document.getElementById('staffPass').value;
+      if(!id || !name || !pass) return alert("請填寫所有欄位 / Please fill all fields");
+      const hash = await sha256(id + ":" + pass);
+      await db.ref("staff/" + id).set({
+        employeeId: id, name, passwordHash: hash, active: true,
+        createdBy: "admin", createdAt: Date.now(), updatedAt: Date.now()
+      });
+      alert("新增成功 / Added successfully");
+    }
+
+    async function loadOrders() {
+      const snap = await db.ref("orders").once("value");
+      const tbody = document.querySelector("#ordersTable tbody");
+      tbody.innerHTML = "";
+      const orders = snap.val() || {};
+      Object.values(orders).forEach(o => {
+        tbody.innerHTML += `<tr><td>${o.orderId}</td><td>${o.eventName_zh}</td><td>${o.buyerType}</td><td>${o.seatId||'未選'}</td><td>${o.status}</td></tr>`;
+      });
+    }
+
+    async function exportAll() {
+      const wb = XLSX.utils.book_new();
+      const snaps = {
+        events: await db.ref("events").once("value"),
+        schools: await db.ref("config/schools").once("value"),
+        staff: await db.ref("staff").once("value"),
+        orders: await db.ref("orders").once("value"),
+        seats: await db.ref("seats").once("value"),
+        reprintLogs: await db.ref("reprintLogs").once("value"),
+        checkinLogs: await db.ref("checkinLogs").once("value")
+      };
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenObject(snaps.events.val())), "Events");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenObject(snaps.schools.val())), "Schools");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenObject(snaps.staff.val())), "Staff");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenObject(snaps.orders.val())), "Orders");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenSeats(snaps.seats.val())), "Seats");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenObject(snaps.reprintLogs.val())), "ReprintLogs");
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(flattenObject(snaps.checkinLogs.val())), "CheckinLogs");
+      downloadExcel(wb, `all-data-${formatDateForFile(new Date())}.xlsx`);
+    }
+
+    async function exportData(type) {
+      const wb = XLSX.utils.book_new();
+      const snap = await db.ref(type).once("value");
+      const data = type === 'seats' ? flattenSeats(snap.val()) : flattenObject(snap.val());
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), type);
+      downloadExcel(wb, `${type}-${formatDateForFile(new Date())}.xlsx`);
+    }
+  </script>
+</body>
+</html>
